@@ -14,8 +14,7 @@ void exitp(int);
 
 char *gpg_cmd = NULL;
 char *gpg_args = "\0";
-char *command = NULL;
-char *identity = NULL;
+char *command = NULL; char *identity = NULL;
 char *working_directory = NULL;
 int verbosity = 0;
 int cargc = 0;
@@ -24,8 +23,8 @@ char *cargv[16];
 char *redirect_output = " > /dev/null";
 
 int systemf(char *format, ...) {
-	char *cmd_prefix = "sh -c \"";
-	char *cmd_postfix = "\"";
+	const char *cmd_prefix = "sh -c \"";
+	const char *cmd_postfix = "\"";
 	const int prefix_len = strlen(cmd_prefix);
 	const int postfix_len = strlen(cmd_postfix);
 	va_list args;
@@ -350,7 +349,9 @@ void initialize() {
 
 void run() {
 	if (working_directory != NULL) {
+		printf("xx wd %s\n", working_directory); fflush(stdout);
 		chdir(working_directory);
+		printf("xx wd %s\n", working_directory); fflush(stdout);
 	}
 	if (!check_wd_initialized()) {
 		if (strcmp(command, "test") == 0) {
