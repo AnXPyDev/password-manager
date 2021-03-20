@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <malloc.h>
+#include <memory.h>
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
@@ -75,10 +76,17 @@ char *redirect_output = " > /dev/null";
 FILE *lockfile = NULL;
 
 int systemf(char *format, ...) {
+	const char *cmd_prefix = "sh -c \"";
+	const char *cmd_postfix = "\"";
+	const int prefix_len = strlen(cmd_prefix);
+	const int postfix_len = strlen(cmd_postfix);
 	va_list args;
 	va_start(args, format);
-	char *buffer = alloca(vsnprintf(NULL, 0, format, args) + 1);
-	vsprintf(buffer, format, args);
+	int format_len = vsnprintf(NULL, 0, format, args);
+	char *buffer = alloca(prefix_len + format_len + postfix_len + 1);
+	memcpy(buffer, cmd_prefix, prefix_len);
+	vsprintf(buffer + prefix_len, format, args);
+	memcpy(buffer + prefix_len + format_len, cmd_postfix, postfix_len + 1);
 	if (verbosity) {
 		fprintf(stderr, "%s\n", buffer);
 	}
@@ -386,7 +394,9 @@ void initialize() {
 
 void run() {
 	if (working_directory != NULL) {
+		printf("xx wd %s\n", working_directory); fflush(stdout);
 		chdir(working_directory);
+		printf("xx wd %s\n", working_directory); fflush(stdout);
 	}
 	if (!check_wd_initialized()) {
 		if (strcmp(command, "test") == 0) {
