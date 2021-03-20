@@ -1,65 +1,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <malloc.h>
+#include <memory.h>
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
 #include <signal.h>
 
 
-int argc;
-char **argv;
-
 void exitp(int);
 
-struct Argument {
-	char *value;
-	int status;
-};
-
-int check_flag(char *flagname) {
-	for (int i = 1; i < argc; i++) {
-		if (strcmp(flagname, argv[i]) == 0) {
-			return i;
-		}
-	}
-	return 0;
-}
-
-void extract_flag(char *flagname, int *dest) {
-	*dest = check_flag(flagname) > 0 ? 1 : 0;
-}
-
-struct Argument get_arg(char *argname) {
-	struct Argument ret;
-	int index = check_flag(argname);
-	if (index == 0) {
-		ret.value = NULL;
-		ret.status = 1;
-		return ret;
-	}
-
-	if (index + 1 >= argc) {
-		ret.value = NULL;
-		ret.status = 2;
-	} else {
-		ret.value = argv[index + 1];
-		if ('-' == ret.value[0]) {
-			ret.value = NULL;
-			ret.status = 2;
-		} else {
-			ret.status = 0;
-		}
-	}
-	return ret;
-}
-
-void extract_arg(char *argname, char **dest) {
-	struct Argument arg = get_arg(argname);
-	if (arg.status == 0) {
-		*dest = arg.value;
-	}
-}
+#include "arg.h"
 
 char *gpg_cmd = NULL;
 char *gpg_args = "\0";
@@ -72,19 +23,27 @@ char *cargv[16];
 
 char *redirect_output = " > /dev/null";
 
-FILE *lockfile = NULL;
-
 int systemf(char *format, ...) {
+	char *cmd_prefix = "sh -c \"";
+	char *cmd_postfix = "\"";
+	const int prefix_len = strlen(cmd_prefix);
+	const int postfix_len = strlen(cmd_postfix);
 	va_list args;
 	va_start(args, format);
-	char *buffer = alloca(vsnprintf(NULL, 0, format, args) + 1);
-	vsprintf(buffer, format, args);
+	int format_len = vsnprintf(NULL, 0, format, args);
+	char *buffer = alloca(prefix_len + format_len + postfix_len + 1);
+	memcpy(buffer, cmd_prefix, prefix_len);
+	vsprintf(buffer + prefix_len, format, args);
+	memcpy(buffer + prefix_len + format_len, cmd_postfix, postfix_len + 1);
 	if (verbosity) {
-		fprintf(stderr, "%s\n", buffer);
+		fprintf(stderr, "system call \"%s\"", buffer);
 	}
-	return system(buffer);
+	int code = system(buffer);
+	if (verbosity) {
+		fprintf(stderr, " returned code %i\n", code);
+	}
+	return code;
 }
-
 
 void cmd_help() {
 	printf("Help message\n");
@@ -96,6 +55,18 @@ int check_file_exists(char *path) {
 		return 0;
 	}
 	fclose(file);
+	return 1;
+}
+
+int ensure_file_exists(char *path) {
+	if (!check_file_exists) {
+		FILE *file = fopen(path, "w");
+		if (file == NULL) {
+			return 0;
+		}
+		fclose(file);
+		return 1;
+	}
 	return 1;
 }
 
@@ -130,6 +101,7 @@ init:;
 	}
 	fprintf(config, "%s", id);
 	fclose(config);
+	fprintf(stderr, "Initialized successfully!\n");
 }
 
 int gpg_encrypt_file(char *path, char *dest) {
@@ -142,15 +114,14 @@ int gpg_decrypt_file(char *path, char *dest) {
 
 
 void lock() {
-	if (lockfile == NULL) {
-		fprintf(stderr, "Error: lockfile is not open\n");
+	if (check_file_exists(".lockfile")) {
+		fprintf(stderr, "Error: lockfile does not exist\n");
 		exitp(1);
 	}
 	
 	remove("login.unlocked");
 	remove("password.unlocked");
 
-	fclose(lockfile);
 	remove(".lockfile");
 }
 
@@ -176,18 +147,11 @@ int create_empty_file(char *path) {
 }
 
 void unlock() {
-	if (lockfile != NULL) {
-		fprintf(stderr, "Error: lockfile is already opened somehow\n");
+	if (check_file_exists(".lockfile")) {
+		fprintf(stderr, "Error: lockfile already exists\n");
 		exitp(1);
 	}
-	lockfile = fopen(".lockfile", "r");
-	if (lockfile != NULL) {
-		fprintf(stderr, "Error: lockfile is present in working directory\n");
-		fclose(lockfile);
-		exitp(1);
-	}
-	lockfile = fopen(".lockfile", "w");
-	if (lockfile == NULL) {
+	if (!ensure_file_exists(".lockfile")) {
 		fprintf(stderr, "Failed to create lockfile\n");
 		exitp(1);
 	}
@@ -440,12 +404,22 @@ void run() {
 		return;
 	}
 
+	if (strcmp(command, "lock") == 0) {
+		lock();
+		return;
+	}
+	if (strcmp(command, "unlock") == 0) {
+		unlock();
+		return;
+	}
+	if (strcmp(command, "save") == 0) {
+		save();
+		return;
+	}
+
 }
 
 void exitp(int code) {
-	if (lockfile != NULL) {
-		fclose(lockfile);
-	}
 	remove(".lockfile");
 	exit(code);
 }
@@ -456,8 +430,7 @@ void handle_interrupt(int sig) {
 }
 
 
-int main(int _argc, char **_argv) {
-	signal(SIGINT, handle_interrupt);
+int main(int _argc, char **_argv) { signal(SIGINT, handle_interrupt);
 	for (int i = 0; i < 16; i++) {
 		cargv[i] = NULL;
 	}
@@ -465,6 +438,5 @@ int main(int _argc, char **_argv) {
 	argv = _argv;
 	initialize();
 	run();
-
 	return 0;
 }
